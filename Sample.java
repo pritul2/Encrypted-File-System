@@ -85,9 +85,14 @@ public class Sample extends Utility {
 
 
         int len = str_content.length();
-        int start_block = starting_position / Config.BLOCK_SIZE;
-        int end_block = (starting_position + len) / Config.BLOCK_SIZE;
-        for (int i = start_block + 1; i <= end_block + 1; i++) {
+        int num_blocks = (int) Math.ceil((double) content.length / Config.BLOCK_SIZE);
+
+
+        int startBlock = starting_position / Config.BLOCK_SIZE;
+        int end_block = (starting_position + content.length - 1) / Config.BLOCK_SIZE;
+
+
+        for (int i = startBlock + 1; i <= end_block + 1; i++) {
             int sp = (i - 1) * Config.BLOCK_SIZE - starting_position;
             int ep = (i) * Config.BLOCK_SIZE - starting_position;
             String prefix = "";

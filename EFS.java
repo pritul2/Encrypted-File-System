@@ -21,9 +21,8 @@ public class EFS extends Utility {
     private static final int SALT_LENGTH = 16;
     private static final int HEADER_LENGTH = USER_NAME_LENGTH + PWD_LENGTH + SALT_LENGTH;
     private static final int SECRET_DATA_LENGTH = 128;
-    private static final int METADATA_LENGTH = HEADER_LENGTH + SECRET_DATA_LENGTH;
+    private static final int METADATA_LENGTH = HEADER_LENGTH+SECRET_DATA_LENGTH;
     private static final int HMAC_LENGTH = 32;
-   
 
     public EFS(Editor e) {
         super(e);
@@ -85,19 +84,19 @@ public class EFS extends Utility {
         return key;
     }
 
-    private byte[] getPasswordHash(String password, byte[] salt) throws Exception{
+    private byte[] getPasswordHash(String password, byte[] salt) throws Exception {
         // Padding password salt
         String padded_password = padString(password, 128);
-    
+
         byte[] passwordBytes = padded_password.getBytes();
-    
+
         byte[] saltedPasswordBytes = new byte[passwordBytes.length + salt.length];
-    
+
         System.arraycopy(passwordBytes, 0, saltedPasswordBytes, 0, passwordBytes.length);
         System.arraycopy(salt, 0, saltedPasswordBytes, passwordBytes.length, salt.length);
-    
+
         byte[] hashed_pwd = hash_SHA256(saltedPasswordBytes);
-    
+
         return hashed_pwd;
     }
 
@@ -116,15 +115,16 @@ public class EFS extends Utility {
 
         // Generting salt
         byte[] salt = secureRandomNumber(16);
-        System.out.println("Salt length "+salt.length);
-        System.out.println("Salt  "+new String(salt));
+        System.out.println("Salt length " + salt.length);
+        System.out.println("Salt  " + new String(salt));
 
         // Padding username
         String padded_user_name = padString(user_name, 128);
 
         // Making hashed password
-        byte[] hashed_pwd = getPasswordHash(password,salt);
+        byte[] hashed_pwd = getPasswordHash(password, salt);
         System.out.println(new String(hashed_pwd));
+
         // Adding padded username and password salt to header
         byte[] header = new byte[padded_user_name.length() + hashed_pwd.length + salt.length];
         System.arraycopy(padded_user_name.getBytes(), 0, header, 0, padded_user_name.length());
@@ -135,7 +135,7 @@ public class EFS extends Utility {
         // System.out.println("Salted password"+saltedPasswordBytes.length);
         // System.out.println("Hashed password"+hashed_pwd.length);
         // System.out.println("header size"+header.length);
-        System.out.println("Meta data file "+metadata_file.length());
+        System.out.println("Meta data file " + metadata_file.length());
         byte[] file_length = longToBytes(metadata_file.length());
 
         // System.out.println("file_length size"+file_length.length);
@@ -156,7 +156,7 @@ public class EFS extends Utility {
 
         // Generating key on the basis of password
         byte[] pwd_base_key = deriveKeyFromPassword(padString(password, 128), salt);
-        System.out.println("Key "+new String(pwd_base_key));
+        System.out.println("Key " + new String(pwd_base_key));
         // Encrypting secret data
         byte[] encrypted_secret_data = encript_AES(secret_data, pwd_base_key);
 
@@ -183,14 +183,19 @@ public class EFS extends Utility {
         metadata_output.write("\n".getBytes());
         metadata_output.write(hmac);
 
+        // generate the padding bytes
+        byte[] combine_data = new byte[metadata.length + hmac.length + "\n".getBytes().length];
+        byte[] padding = padToMultiple(combine_data, Config.BLOCK_SIZE-combine_data.length);
+        metadata_output.write(padding);
         metadata_output.close();
 
         return;
     }
-    private boolean validate_HMAC(byte[] metadata){
+
+    private boolean validate_HMAC(byte[] metadata, File meta) throws Exception {
 
         // Checking if the length of the metadata file is valid
-        if (metadata.length != HEADER_LENGTH + SECRET_DATA_LENGTH +  HMAC_LENGTH + 1) {
+        if (metadata.length != 1024) {
             throw new Exception("Invalid File length");
         }
 
@@ -209,6 +214,7 @@ public class EFS extends Utility {
         return Arrays.equals(hmac, computed_hmac);
 
     }
+
     /**
      * Steps to consider...
      * <p>
@@ -230,7 +236,7 @@ public class EFS extends Utility {
         byte[] metadata = metadata_input.readAllBytes();
 
         // Checking if the computed HMAC matches with the HMAC from metadata file
-        if (!validate_HMAC(metadata)) {
+        if (!validate_HMAC(metadata, meta)) {
             throw new Exception("Metadata file has been tampered with!");
         }
 
@@ -257,28 +263,27 @@ public class EFS extends Utility {
      * <p>
      * - decrypt file length out of encrypted secret data
      */
-    private long convertToLong(byte[] bytes)
-    {
+    private long convertToLong(byte[] bytes) {
         long value = 0l;
- 
+
         // Iterating through for loop
         for (byte b : bytes) {
             // Shifting previous value 8 bits to right and
             // add it with next value
             value = (value << 8) + (b & 255);
         }
- 
+
         return value;
     }
 
-    private boolean verify_pwd(byte[] metadata, String password) throws Exception{
+    private boolean verify_pwd(byte[] metadata, String password) throws Exception {
         // Deriving the salt from header
-        byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH+PWD_LENGTH, HEADER_LENGTH);
+        byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
 
         byte[] encrypted_secret_data = Arrays.copyOfRange(metadata, HEADER_LENGTH, METADATA_LENGTH);
 
         // Getting hashed password
-        byte[] hashed_pwd_2 = getPasswordHash(password,salt);
+        byte[] hashed_pwd_2 = getPasswordHash(password, salt);
 
         // Getting password base key
         byte[] pwd_base_key = deriveKeyFromPassword(padString(password, 128), salt);
@@ -290,7 +295,7 @@ public class EFS extends Utility {
         byte[] hashed_pwd = Arrays.copyOfRange(secret_data, 0, PWD_LENGTH);
 
         return Arrays.equals(hashed_pwd, hashed_pwd_2);
-        
+
     }
 
     @Override
@@ -302,22 +307,26 @@ public class EFS extends Utility {
         FileInputStream metadata_input = new FileInputStream(metadata_file);
         byte[] metadata = metadata_input.readAllBytes();
 
-        //Verify HMAC
-        if (!validate_HMAC(metadata)) {
+        // Verify HMAC
+        if (!validate_HMAC(metadata, metadata_file)) {
             throw new Exception("Metadata file has been tampered with!");
         }
 
-        //Comparing both the hashed passwords
-        if (!verify_pwd(metadata,password)){
+        // Comparing both the hashed passwords
+        if (!verify_pwd(metadata, password)) {
             throw new Exception("Password Does not Match");
         }
 
+        byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
+        byte[] pwd_base_key = deriveKeyFromPassword(padString(password, 128), salt);
+        byte[] encrypted_secret_data = Arrays.copyOfRange(metadata, HEADER_LENGTH, METADATA_LENGTH);
+        byte[] secret_data = decript_AES(encrypted_secret_data, pwd_base_key);
         // Decrypting the file length
         long file_length = bytesToLong(Arrays.copyOfRange(secret_data, PWD_LENGTH, secret_data.length));
-        
+
         System.out.println(file_length);
 
-        return (int)file_length;
+        return (int) file_length;
 
     }
 
@@ -336,19 +345,12 @@ public class EFS extends Utility {
         File metadata_file = new File(dir, "0");
         FileInputStream metadata_input = new FileInputStream(metadata_file);
         byte[] metadata = metadata_input.readAllBytes();
-        
-        //Verify HMAC
-        if (!validate_HMAC(metadata)) {
-            throw new Exception("Metadata file has been tampered with!");
-        }
 
-        //Comparing both the hashed passwords
-        if (!verify_pwd(metadata,password)){
+        // Comparing both the hashed passwords
+        if (!verify_pwd(metadata, password)) {
             throw new Exception("Password Does not Match");
         }
 
-
-        
         return null;
     }
 
@@ -370,13 +372,19 @@ public class EFS extends Utility {
         FileInputStream metadata_input = new FileInputStream(metadata_file);
         byte[] metadata = metadata_input.readAllBytes();
 
-        //Finding file length and verifing the password
-        int file_length = length(file_name,password);
+        // Finding file length and verifing the password
+        int file_length = length(file_name, password);
 
-
-        if ( (starting_position < 0 || starting_position >= file_length) || (len < 0 || starting_position + len > file_length) {
+        // Needs to recheck
+        if (starting_position < 0 || starting_position >= file_length) {
             throw new IllegalArgumentException("Invalid starting position");
         }
+
+        // Computing the block size
+        int n1 = starting_position / Config.BLOCK_SIZE;
+        int n2 = (starting_position + content.length - 1) / Config.BLOCK_SIZE;
+
+
 
     }
 
@@ -408,17 +416,25 @@ public class EFS extends Utility {
     public void cut(String file_name, int length, String password) throws Exception {
     }
 
-    public static void main(String[] args) {
-        Editor edr = new Editor();
-        EFS efs = new EFS(edr);
-        try {
-            efs.create("my_file2", "HelloWORLD", "macbook");
-            System.out.println(efs.findUser("my_file2"));
-            System.out.println(efs.length("my_file2","macbook"));
-        } catch (Exception e) {
-            System.err.println("Error: " + e.getMessage());
-        }
-
+    private static String getContent(){
+        String content = new String("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse ut sem nunc. Nulla facilisi. Nulla facilisi. Sed non malesuada tortor. Maecenas euismod euismod ipsum, vel feugiat quam. Morbi vestibulum placerat tellus vel feugiat. Nullam eget rutrum felis. Duis sed nibh pharetra, gravida neque nec, tempor magna. Sed ac risus non mauris elementum euismod. Donec dignissim, mauris vel hendrerit pharetra, sapien tortor mattis lectus, id dapibus turpis ipsum ut nunc. Aliquam erat volutpat. Sed iaculis neque ac lacus tincidunt faucibus. Donec vel nisi quis erat tincidunt sollicitudin vel vel odio. Vestibulum euismod diam in quam varius, nec iaculis orci consequat. Sed vel blandit tellus. Etiam a dolor libero. Fusce lobortis, elit in laoreet interdum, ante ante dictum magna, sit amet luctus quam sapien at ipsum. Sed bibendum lorem non massa malesuada, non consectetur eros faucibus. Nulla facilisi. Sed fermentum feugiat sapien, at efficitur velit volutpat vel. Duis bibendum est eu arcu tincidunt, nec scelerisque erat vehicula. In sit amet massa tristique, ultrices purus vel, imperdiet quam. Donec rutrum purus vel nibh aliquet, a luctus ipsum facilisis. Nulla fringilla est odio, in tincidunt ipsum congue id. Nulla facilisi. Sed vulputate aliquam nulla, eu mollis purus semper ac. Duis quis arcu euismod, consectetur dolor id, posuere quam. Nunc vel erat lectus. Donec volutpat erat elit, eu viverra nibh fermentum eu. Praesent in leo a sapien molestie maximus. Duis non imperdiet dolor. Nam vehicula auctor purus, eget cursus arcu cursus sed. Fusce maximus lectus non magna vehicula malesuada. Suspendisse malesuada diam eget nibh porttitor, vitae blandit ante varius. Duis varius fringilla nisl, vel feugiat sapien laoreet at. Sed in velit neque. Vestibulum suscipit blandit magna, a pellentesque nisl maximus vitae. Aenean commodo risus sed risus ultricies tristique a vel nisi. Sed commodo elit sit amet dolor aliquam venenatis. Praesent at bibendum urna. Etiam vel ex sed leo finibus venenatis. Sed sed ipsum sit amet elit rutrum suscipit vel vel elit. Nulla varius blandit leo, quis bibendum ante molestie sit amet. Donec id luctus lectus. Quisque rutrum felis at mi tincidunt posuere. Donec pretium mi eu sem dignissim fringilla. Morbi gravida lorem vel mauris auctor, eget eleifend nibh efficitur. Nulla facilisi. In hac habitasse platea dictumst. Suspendisse viverra justo at felis malesuada, vel mattis leo varius. Maecenas maximus augue ac bibendum aliquet. Vivamus sit amet purus ac arcu pulvinar egestas. Integer faucibus");
+        return content;
     }
+
+    public static void main(String[] args) {
+         Editor edr = new Editor();
+         EFS efs = new EFS(edr);
+         try {
+             efs.create("my_file2", "HelloWORLD", "macbook");
+             System.out.println(efs.findUser("my_file2"));
+             System.out.println(efs.length("my_file2","macbook"));
+             
+             efs.write("my_file2",0,getContent().getBytes()
+             ,"macbook");
+         } catch (Exception e) {
+             System.err.println("Error: " + e.getMessage());
+         }
+ 
+     }
 
 }
