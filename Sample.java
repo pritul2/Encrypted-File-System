@@ -69,6 +69,7 @@ public class Sample extends Utility {
             toReturn += temp;
         }
 
+        System.out.println(toReturn);
         return toReturn.getBytes("UTF-8");
 
     }
@@ -77,11 +78,7 @@ public class Sample extends Utility {
     public void write(String file_name, int starting_position, byte[] content, String password) throws Exception {
         String str_content = byteArray2String(content);
         File root = new File(file_name);
-        int file_length = length(file_name, password);
-
-        if (starting_position > file_length) {
-            throw new Exception();
-        }
+        int file_length = 0;
 
 
         int len = str_content.length();
@@ -97,10 +94,10 @@ public class Sample extends Utility {
             int ep = (i) * Config.BLOCK_SIZE - starting_position;
             String prefix = "";
             String postfix = "";
-            if (i == start_block + 1 && starting_position != start_block * Config.BLOCK_SIZE) {
+            if (i == startBlock + 1 && starting_position != startBlock * Config.BLOCK_SIZE) {
 
                 prefix = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
-                prefix = prefix.substring(0, starting_position - start_block * Config.BLOCK_SIZE);
+                prefix = prefix.substring(0, starting_position - startBlock * Config.BLOCK_SIZE);
                 sp = Math.max(sp, 0);
             }
 
@@ -145,7 +142,6 @@ public class Sample extends Utility {
             save_to_file(toWrite.getBytes(), new File(root, "0"));
 
         }
-
     }
 
     @Override
@@ -192,6 +188,25 @@ public class Sample extends Utility {
             toWrite += '\0';
         }
         save_to_file(toWrite.getBytes(), new File(root, "0"));
+    }
+
+
+    private static String getContent(){
+        String musk_bio = new String("Musk was born in Pretoria");
+        String content = new String("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse ut sem nunc. Nulla facilisi. Nulla facilisi. Sed non malesuada tortor. Maecenas euismod euismod ipsum, vel feugiat quam. Morbi vestibulum placerat tellus vel feugiat. Nullam eget rutrum felis. Duis sed nibh pharetra, gravida neque nec, tempor magna. Sed ac risus non mauris elementum euismod. Donec dignissim, mauris vel hendrerit pharetra, sapien tortor mattis lectus, id dapibus turpis ipsum ut nunc. Aliquam erat volutpat. Sed iaculis neque ac lacus tincidunt faucibus. Donec vel nisi quis erat tincidunt sollicitudin vel vel odio. Vestibulum euismod diam in quam varius, nec iaculis orci consequat. Sed vel blandit tellus. Etiam a dolor libero. Fusce lobortis, elit in laoreet interdum, ante ante dictum magna, sit amet luctus quam sapien at ipsum. Sed bibendum lorem non massa malesuada, non consectetur eros faucibus. Nulla facilisi. Sed fermentum feugiat sapien, at efficitur velit volutpat vel. Duis bibendum est eu arcu tincidunt, nec scelerisque erat vehicula. In sit amet massa tristique, ultrices purus vel, imperdiet quam. Donec rutrum purus vel nibh aliquet, a luctus ipsum facilisis. Nulla fringilla est odio, in tincidunt ipsum congue id. Nulla facilisi. Sed vulputate aliquam nulla, eu mollis purus semper ac. Duis quis arcu euismod, consectetur dolor id, posuere quam. Nunc vel erat lectus. Donec volutpat erat elit, eu viverra nibh fermentum eu. Praesent in leo a sapien molestie maximus. Duis non imperdiet dolor. Nam vehicula auctor purus, eget cursus arcu cursus sed. Fusce maximus lectus non magna vehicula malesuada. Suspendisse malesuada diam eget nibh porttitor, vitae blandit ante varius. Duis varius fringilla nisl, vel feugiat sapien laoreet at. Sed in velit neque. Vestibulum suscipit blandit magna, a pellentesque nisl maximus vitae. Aenean commodo risus sed risus ultricies tristique a vel nisi. Sed commodo elit sit amet dolor aliquam venenatis. Praesent at bibendum urna. Etiam vel ex sed leo finibus venenatis. Sed sed ipsum sit amet elit rutrum suscipit vel vel elit. Nulla varius blandit leo, quis bibendum ante molestie sit amet. Donec id luctus lectus. Quisque rutrum felis at mi tincidunt posuere. Donec pretium mi eu sem dignissim fringilla. Morbi gravida lorem vel mauris auctor, eget eleifend nibh efficitur. Nulla facilisi. In hac habitasse platea dictumst. Suspendisse viverra justo at felis malesuada, vel mattis leo varius. Maecenas maximus augue ac bibendum aliquet. Vivamus sit amet purus ac arcu pulvinar egestas. Integer faucibus");
+        return musk_bio;
+    }
+
+    public static void main(String[] args) {
+        Editor edr = new Editor();
+        Sample efs = new Sample(edr);
+        try {
+            efs.write("/Users/pritul/Books/Information security/Project1/src/my_file2",30,getContent().getBytes(),"macbook");
+            efs.read("/Users/pritul/Books/Information security/Project1/src/my_file2",50,300,"macbook");
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
+        }
+
     }
     
 }
