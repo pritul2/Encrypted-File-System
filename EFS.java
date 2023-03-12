@@ -9,8 +9,14 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+
+import javax.crypto.Cipher;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
+
+import java.security.Key;
 import java.security.spec.KeySpec;
 import java.util.Arrays;
 
@@ -75,15 +81,40 @@ public class EFS extends Utility {
         return paddedData;
     }
 
-    private byte[] pkcs7Pad(byte[] data, int blocksize) {
+    /*private byte[] ISO7816_4Pad(byte[] data, int blocksize) throws Exception {
+        // Create a key and initialize the cipher
+        byte[] keyBytes = new byte[blocksize];
+        Key key = new SecretKeySpec(keyBytes, "AES");
+        Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
+        cipher.init(Cipher.ENCRYPT_MODE, key);
+    
+        // Pad the data using PKCS#7 padding
+        byte[] paddedData = cipher.doFinal(data);
+    
+        return paddedData;
+    }*/
+
+    public static byte[] ISO7816_4Pad(byte[] message, int blockSize) {
+        int paddingLength = blockSize - (message.length % blockSize);
+        byte[] paddedMessage = new byte[message.length + paddingLength];
+        System.arraycopy(message, 0, paddedMessage, 0, message.length);
+        paddedMessage[message.length] = (byte) 0x80;
+        for (int i = message.length + 1; i < paddedMessage.length; i++) {
+            paddedMessage[i] = 0x00;
+        }
+        return paddedMessage;
+    }
+    
+
+    /*private byte[] ISO7816_4Pad(byte[] data, int blocksize) {
         int padSize = blocksize - (data.length % blocksize);
         byte[] paddedData = new byte[data.length + padSize];
         System.arraycopy(data, 0, paddedData, 0, data.length);
         for (int i = 0; i < padSize; i++) {
-            paddedData[data.length + i] = (byte) padSize;
-        }
+            paddedData[data.length + i % padSize] = (byte) padSize;
+        
         return paddedData;
-    }
+    }*/
 
     private byte[] deriveKeyFromPassword(String password, byte[] salt) throws Exception {
         int iterations = 1000;
@@ -117,11 +148,11 @@ public class EFS extends Utility {
         byte[] metadata = metadata_input.readAllBytes();
         return metadata;
     }
-    private byte[] round_off(byte[] written_content) {
+    /*private byte[] round_off(byte[] written_content) {
         int len = written_content.length;
-        int require_pad = (int) (Math.ceil(len/16)*16);
-        return pkcs7Pad(written_content, require_pad);
-    }
+        int require_pad = len - (int) (Math.ceil(len/16))*16;
+        return ISO7816_4Pad(written_content, require_pad);
+    }*/
 
     @Override
     public void create(String file_name, String user_name, String password) throws Exception {
@@ -204,13 +235,18 @@ public class EFS extends Utility {
         // System.out.println("metadata length"+ metadata.length);
         // System.out.println("hmac length"+ hmac.length);
 
-        metadata_output.write(metadata);
+        /*metadata_output.write(metadata);
         metadata_output.write("\n".getBytes());
-        metadata_output.write(hmac);
+        metadata_output.write(hmac);*/
 
         // generate the padding bytes
-        byte[] combine_data = new byte[metadata.length + hmac.length + "\n".getBytes().length];
-        byte[] padding = padToMultiple(combine_data, Config.BLOCK_SIZE-combine_data.length);
+        byte[] combine_data = new byte[metadata.length +"\n".getBytes().length+ hmac.length];
+        System.arraycopy(metadata, 0, combine_data, 0, metadata.length);
+        System.arraycopy("\n".getBytes(), 0, combine_data, metadata.length, "\n".length());
+        System.arraycopy(hmac, 0, combine_data, metadata.length+"\n".length(), hmac.length);
+
+
+        byte[] padding = ISO7816_4Pad(combine_data, 1024);
         metadata_output.write(padding);
         metadata_output.close();
 
@@ -368,17 +404,36 @@ public class EFS extends Utility {
      */
     @Override
     public byte[] read(String file_name, int starting_position, int len, String password) throws Exception {
-        File dir = new File(file_name);
-        File metadata_file = new File(dir, "0");
-        FileInputStream metadata_input = new FileInputStream(metadata_file);
-        byte[] metadata = metadata_input.readAllBytes();
 
-        // Comparing both the hashed passwords
-        if (!verify_pwd(metadata, password)) {
-            throw new Exception("Password Does not Match");
+        File root = new File(file_name);
+
+        int file_length = length(file_name, password);
+
+        if (starting_position + len > file_length) {
+            throw new Exception();
         }
 
-        return null;
+        int start_block = starting_position / Config.BLOCK_SIZE;
+
+        int end_block = (starting_position + len) / Config.BLOCK_SIZE;
+
+        String toReturn = "";
+
+        for (int i = start_block + 1; i <= end_block + 1; i++) {
+            String temp = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
+            if (i == end_block + 1) {
+                temp = temp.substring(0, starting_position + len - end_block * Config.BLOCK_SIZE);
+            }
+            if (i == start_block + 1) {
+                temp = temp.substring(starting_position - start_block * Config.BLOCK_SIZE);
+            }
+            toReturn += temp;
+        }
+
+
+        System.out.println(toReturn);
+
+        return toReturn.getBytes("UTF-8");
     }
 
     
@@ -397,43 +452,39 @@ public class EFS extends Utility {
      */
     @Override
     public void write(String file_name, int starting_position, byte[] content, String password) throws Exception {
-        File root = new File(file_name);
-
-        // Finding file length and verifing the password
-        int file_length = length(file_name, password);
-
-        String str_content = byteArray2String(content);
-        
+        String str_content = new String(content, StandardCharsets.UTF_8);
         int len = str_content.length();
 
-        // Needs to recheck
-        if (starting_position < 0 || starting_position > file_length) {
-            throw new IllegalArgumentException("Invalid starting position");
+        File root = new File(file_name);
+        int file_length = length(file_name, password);
+
+        if (starting_position > file_length || starting_position < 0) {
+            throw new Exception("Please check starting position!");
         }
 
-        //Storing 80% of 1024 byte data
-        Config.BLOCK_SIZE *= 0.80;
-
+        int Block_size = 912;
         int num_blocks = (int) Math.ceil((double) content.length / Config.BLOCK_SIZE);
 
+        int start_block = starting_position / Block_size;
+        int end_block = (starting_position + len - 1) / Block_size;
 
-        int startBlock = starting_position / Config.BLOCK_SIZE;
-        int end_block = (starting_position + content.length - 1) / Config.BLOCK_SIZE;
-
-        //Getting password salt
         byte[] metadata = getMetadata(file_name);
         byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
+        StringBuilder padded_str = new StringBuilder(password);
+        while (padded_str.length() < 128) {
+            padded_str.append('\0');
+        }
+        String padded_password = padded_str.toString();
 
-
-        for (int i = startBlock + 1; i <= end_block + 1; i++) {
-            int sp = (i - 1) * Config.BLOCK_SIZE - starting_position;
-            int ep = (i) * Config.BLOCK_SIZE - starting_position;
+        for (int i = start_block + 1; i <= end_block + 1; i++) {
+            int sp = (i - 1) * Block_size - starting_position;
+            int ep = (i) * Block_size - starting_position;
             String prefix = "";
             String postfix = "";
-            if (i == startBlock + 1 && starting_position != startBlock * Config.BLOCK_SIZE) {
+            if (i == start_block + 1 && starting_position != start_block * Block_size) {
 
-                prefix = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
-                prefix = prefix.substring(0, starting_position - startBlock * Config.BLOCK_SIZE);
+                prefix = new String(read_from_file(new File(root, Integer.toString(i))), StandardCharsets.UTF_8);
+                prefix = prefix.substring(0, starting_position - start_block * Block_size);
                 sp = Math.max(sp, 0);
             }
 
@@ -441,10 +492,10 @@ public class EFS extends Utility {
                 File end = new File(root, Integer.toString(i));
                 if (end.exists()) {
 
-                    postfix = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
+                    postfix = new String(read_from_file(new File(root, Integer.toString(i))), StandardCharsets.UTF_8);
 
-                    if (postfix.length() > starting_position + len - end_block * Config.BLOCK_SIZE) {
-                        postfix = postfix.substring(starting_position + len - end_block * Config.BLOCK_SIZE);
+                    if (postfix.length() > starting_position + len - end_block * Block_size) {
+                        postfix = postfix.substring(starting_position + len - end_block * Block_size);
                     } else {
                         postfix = "";
                     }
@@ -453,42 +504,25 @@ public class EFS extends Utility {
             }
 
             String toWrite = prefix + str_content.substring(sp, ep) + postfix;
-
-            //Converting written data into  byte[]
             byte[] written_content = toWrite.getBytes();
-
-            //Encrypting the data
-
-            // Add the IV counter to the last byte of the random number
             int lastIndex = salt.length - 1;
             salt[lastIndex] += 1;
 
-            byte[] pwd_base_key = deriveKeyFromPassword(padString(password, 128), salt);
-
-            //Round of content to multiples of 16
-            written_content = round_off(written_content);
-            
+            byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
+            //written_content = round_off(written_content);
+            if(written_content.length<912){
+                written_content = ISO7816_4Pad(written_content, (912));
+            }
             byte[] encrypted_secret_data = encript_AES(written_content, pwd_base_key);
-
-            //Adding 32 byte of HMAC
             byte[] computed_hmac = hash_SHA256(encrypted_secret_data);
 
-            //Combining byte array
             byte[] combined = new byte[encrypted_secret_data.length + computed_hmac.length];
 
             System.arraycopy(encrypted_secret_data, 0, combined, 0, encrypted_secret_data.length);
-            System.arraycopy(computed_hmac, 0, combined, encrypted_secret_data.length, computed_hmac.length);
+            System.arraycopy(computed_hmac, 0, combined,encrypted_secret_data.length, computed_hmac.length);
 
-            //Padding remaining space
-            byte[] padded = pkcs7Pad(combined, 1024-combined.length);
+            byte[] combinedAndPadded = ISO7816_4Pad(combined, 1024);
 
-            byte[] combinedAndPadded = new byte[combined.length + padded.length];
-            System.arraycopy(combined, 0, combinedAndPadded, 0, combined.length);
-            System.arraycopy(padded, 0, combinedAndPadded, combined.length, padded.length);
-
-
-
-            //Writting over file
             save_to_file(combinedAndPadded, new File(root, Integer.toString(i)));
         }
     }
@@ -532,10 +566,10 @@ public class EFS extends Utility {
          Editor edr = new Editor();
          EFS efs = new EFS(edr);
          try {
-             efs.create("my_file3", "HelloWORLD", "macbook");
-             System.out.println(efs.findUser("my_file3"));
-             System.out.println(efs.length("my_file3","macbook"));
-             efs.write("/Users/pritul/Books/Information security/Project1/src/my_file3",0,getContent().getBytes(),"macbook");
+             efs.create("my_file6", "HelloWORLD", "macbook");
+             System.out.println(efs.findUser("my_file6"));
+             System.out.println(efs.length("my_file6","macbook"));
+             efs.write("my_file6",0,getContent().getBytes(),"macbook");
          } catch (Exception e) {
              System.err.println("Error: " + e.getMessage());
          }
