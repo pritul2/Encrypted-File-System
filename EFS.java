@@ -5,6 +5,7 @@
  * @email pritul.dave@utdallas.edu
  */
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -404,37 +405,49 @@ public class EFS extends Utility {
      */
     @Override
     public byte[] read(String file_name, int starting_position, int len, String password) throws Exception {
+    	File root = new File(file_name);
 
-        File root = new File(file_name);
-
+        // Verify password and get file length
+        byte[] metadata = getMetadata(file_name);
         int file_length = length(file_name, password);
 
         if (starting_position + len > file_length) {
             throw new Exception();
         }
 
-        int start_block = starting_position / Config.BLOCK_SIZE;
+        int Block_size = 912;
+        int start_block = starting_position / Block_size;
+        int end_block = (starting_position + len) / Block_size;
+    
+        byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
+        int last_index = salt.length-1;
+        salt[last_index] += start_block;
 
-        int end_block = (starting_position + len) / Config.BLOCK_SIZE;
+        StringBuilder padded_str = new StringBuilder(password);
+        while (padded_str.length() < 128) {
+            padded_str.append('\0');
+        }
+        String padded_password = padded_str.toString();
 
         String toReturn = "";
-
         for (int i = start_block + 1; i <= end_block + 1; i++) {
-            String temp = byteArray2String(read_from_file(new File(root, Integer.toString(i))));
+            byte[] encrypted_text=read_from_file(new File(root, Integer.toString(i)));
+            salt[last_index]  += 1;
+            byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
+            byte[] plain_text = decript_AES(encrypted_text, pwd_base_key);
+            String temp = new String(plain_text, StandardCharsets.UTF_8);
             if (i == end_block + 1) {
-                temp = temp.substring(0, starting_position + len - end_block * Config.BLOCK_SIZE);
+                temp = temp.substring(0, starting_position + len - end_block * Block_size);
             }
             if (i == start_block + 1) {
-                temp = temp.substring(starting_position - start_block * Config.BLOCK_SIZE);
+                temp = temp.substring(starting_position - start_block * Block_size);
             }
             toReturn += temp;
         }
-
-
         System.out.println(toReturn);
-
         return toReturn.getBytes("UTF-8");
     }
+    
 
     
     
@@ -470,11 +483,11 @@ public class EFS extends Utility {
 
         byte[] metadata = getMetadata(file_name);
         byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
-        StringBuilder padded_str = new StringBuilder(password);
-        while (padded_str.length() < 128) {
-            padded_str.append('\0');
-        }
-        String padded_password = padded_str.toString();
+        
+        String padded_password = padString(password, 128);
+
+        int lastIndex = salt.length - 1;
+        salt[lastIndex] += start_block;
 
         for (int i = start_block + 1; i <= end_block + 1; i++) {
             int sp = (i - 1) * Block_size - starting_position;
@@ -505,7 +518,6 @@ public class EFS extends Utility {
 
             String toWrite = prefix + str_content.substring(sp, ep) + postfix;
             byte[] written_content = toWrite.getBytes();
-            int lastIndex = salt.length - 1;
             salt[lastIndex] += 1;
 
             byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
@@ -525,6 +537,57 @@ public class EFS extends Utility {
 
             save_to_file(combinedAndPadded, new File(root, Integer.toString(i)));
         }
+        
+        //update meta data
+        System.out.println("editing metadata");
+
+        byte[] hashed_salted_password = Arrays.copyOfRange(metadata, USER_NAME_LENGTH, USER_NAME_LENGTH + PWD_LENGTH);
+
+        // get new content length
+        //byte[] file_len = ByteBuffer.allocate(4).putInt(len).array();
+        //System.out.println("file_len "+ file_len);
+        byte[] file_len = longToBytes(len);
+        byte[] meta_secret_data = new byte[hashed_salted_password.length + file_len.length];
+    
+        int secret_data_idx = 0;
+        for (byte b : hashed_salted_password) {
+            meta_secret_data[secret_data_idx++] = b;
+        }
+        for (byte b : file_len) {
+            meta_secret_data[secret_data_idx++] = b;
+        }
+
+        meta_secret_data = padToMultiple(meta_secret_data, 128);
+
+        byte[] new_salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
+        byte[] pwd_key = deriveKeyFromPassword(padded_password, new_salt);
+        byte[] encrypted_secret = encript_AES(meta_secret_data, pwd_key);
+
+        byte[] header = Arrays.copyOfRange(metadata, 0, HEADER_LENGTH);
+
+
+        byte[] meta_data = new byte[header.length + encrypted_secret.length];
+        
+
+        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+        outputStream.write(header);
+        outputStream.write(encrypted_secret);
+        meta_data = outputStream.toByteArray();
+
+        byte[] hmac = hash_SHA256(meta_data);
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+        byte[] combine_data = new byte[meta_data.length +"\n".getBytes().length+ HMAC_LENGTH];
+        System.arraycopy(meta_data, 0, combine_data, 0, meta_data.length);
+        System.arraycopy("\n".getBytes(), 0, combine_data, meta_data.length, "\n".length());
+        System.arraycopy(hmac, 0, combine_data, meta_data.length+"\n".length(), HMAC_LENGTH);
+        byte[] padding = ISO7816_4Pad(combine_data, 1024);
+        output.write(padding);
+        byte[] outputBytes = output.toByteArray();
+    
+        File dir = new File(file_name);
+        File metadata_file = new File(dir, "0");
+        save_to_file(outputBytes, metadata_file);
     }
 
     
@@ -540,8 +603,43 @@ public class EFS extends Utility {
      */
     @Override
     public boolean check_integrity(String file_name, String password) throws Exception {
-        return true;
-    }
+        File dir = new File(file_name);
+        File meta = new File(dir, "0");
+
+        // Verify password
+        byte[] metadata = getMetadata(file_name);
+        if (!verify_pwd(metadata, password)) {
+            throw new Exception("Password does not match");
+        }
+
+        // Verify HMAC
+        if (!validate_HMAC(metadata, meta)) {
+            return false;
+        }
+
+        int Block_size = 912;
+        int file_length = length(file_name, password);
+        int start_block = 1;
+        int end_block = (int) (Math.ceil((float)file_length / (float)Block_size));
+
+        for (int i = start_block; i <= end_block; i++) {
+            
+            File temp = new File(dir, Integer.toString(i));
+            FileInputStream temp_input = new FileInputStream(temp);
+            byte[] tempdata = temp_input.readAllBytes();
+
+            byte[] hmac = Arrays.copyOfRange(tempdata, Block_size, Block_size + HMAC_LENGTH);
+            byte[] data = Arrays.copyOfRange(tempdata, 0, Block_size);
+            byte[] computed_hmac = hash_SHA256(data);
+
+            if (!Arrays.equals(hmac, computed_hmac)) {
+                temp_input.close();
+                return false;
+            }
+            temp_input.close();
+        }
+    	return true;
+  }
 
     /**
      * Steps to consider...
@@ -566,10 +664,12 @@ public class EFS extends Utility {
          Editor edr = new Editor();
          EFS efs = new EFS(edr);
          try {
-             efs.create("my_file6", "HelloWORLD", "macbook");
-             System.out.println(efs.findUser("my_file6"));
-             System.out.println(efs.length("my_file6","macbook"));
-             efs.write("my_file6",0,getContent().getBytes(),"macbook");
+             efs.create("my_file7", "HelloWORLD", "macbook");
+             System.out.println(efs.findUser("my_file7"));
+             System.out.println(efs.length("my_file7","macbook"));
+             efs.write("my_file7",0,getContent().getBytes(),"macbook");
+             efs.read("my_file7",800,500,"macbook");
+             System.out.println(efs.check_integrity("my_file7","macbook"));
          } catch (Exception e) {
              System.err.println("Error: " + e.getMessage());
          }
