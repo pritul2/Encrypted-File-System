@@ -415,7 +415,7 @@ public class EFS extends Utility {
             throw new Exception();
         }
 
-        int Block_size = 912;
+        int Block_size = 848;
         int start_block = starting_position / Block_size;
         int end_block = (starting_position + len) / Block_size;
     
@@ -475,7 +475,7 @@ public class EFS extends Utility {
             throw new Exception("Please check starting position!");
         }
 
-        int Block_size = 912;
+        int Block_size = 848;
         int num_blocks = (int) Math.ceil((double) content.length / Config.BLOCK_SIZE);
 
         int start_block = starting_position / Block_size;
@@ -522,8 +522,8 @@ public class EFS extends Utility {
 
             byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
             //written_content = round_off(written_content);
-            if(written_content.length<912){
-                written_content = ISO7816_4Pad(written_content, (912));
+            if(written_content.length<848){
+                written_content = ISO7816_4Pad(written_content, (848));
             }
             byte[] encrypted_secret_data = encript_AES(written_content, pwd_base_key);
             byte[] computed_hmac = hash_SHA256(encrypted_secret_data);
@@ -617,7 +617,7 @@ public class EFS extends Utility {
             return false;
         }
 
-        int Block_size = 912;
+        int Block_size = 848;
         int file_length = length(file_name, password);
         int start_block = 1;
         int end_block = (int) (Math.ceil((float)file_length / (float)Block_size));
