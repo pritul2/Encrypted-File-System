@@ -170,15 +170,13 @@ public class EFS extends Utility {
 
         // Generting salt
         byte[] salt = secureRandomNumber(16);
-        System.out.println("Salt length " + salt.length);
-        System.out.println("Salt  " + new String(salt));
+
 
         // Padding username
         String padded_user_name = padString(user_name, 128);
 
         // Making hashed password
         byte[] hashed_pwd = getPasswordHash(password, salt);
-        System.out.println(new String(hashed_pwd));
 
         // Adding padded username and password salt to header
         byte[] header = new byte[padded_user_name.length() + hashed_pwd.length + salt.length];
@@ -190,7 +188,6 @@ public class EFS extends Utility {
         // System.out.println("Salted password"+saltedPasswordBytes.length);
         // System.out.println("Hashed password"+hashed_pwd.length);
         // System.out.println("header size"+header.length);
-        System.out.println("Meta data file " + metadata_file.length());
         
         // Because metadata file not considered in storage we are placing its file size as 0
         byte[] file_length = longToBytes(0);
@@ -213,7 +210,6 @@ public class EFS extends Utility {
 
         // Generating key on the basis of password
         byte[] pwd_base_key = deriveKeyFromPassword(padString(password, 128), salt);
-        System.out.println("Key " + new String(pwd_base_key));
         // Encrypting secret data
         byte[] encrypted_secret_data = encript_AES(secret_data, pwd_base_key);
 
@@ -311,7 +307,6 @@ public class EFS extends Utility {
         String user_name = new String(user_name_bytes).trim();
 
         // Printing the user name and returning it
-        System.out.println(user_name);
         return user_name;
 
     }
@@ -388,8 +383,6 @@ public class EFS extends Utility {
         // Decrypting the file length
         long file_length = bytesToLong(Arrays.copyOfRange(secret_data, PWD_LENGTH, secret_data.length));
 
-        System.out.println(file_length);
-
         return (int) file_length;
 
     }
@@ -405,18 +398,20 @@ public class EFS extends Utility {
      */
     @Override
     public byte[] read(String file_name, int starting_position, int len, String password) throws Exception {
-    	File root = new File(file_name);
+        File root = new File(file_name);
 
-        // Verify password and get file length
+        // Verify password
         byte[] metadata = getMetadata(file_name);
-        int file_length = length(file_name, password);
+        if (!verify_pwd(metadata, password)) {
+            throw new Exception("Password does not match");
+        }
 
+        int file_length = length(file_name, password);
         if (starting_position + len > file_length) {
             throw new Exception();
         }
-
         int Block_size = 848;
-        int start_block = starting_position / Block_size;
+        int start_block = (starting_position) / Block_size;
         int end_block = (starting_position + len) / Block_size;
     
         byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
@@ -433,19 +428,20 @@ public class EFS extends Utility {
         for (int i = start_block + 1; i <= end_block + 1; i++) {
             byte[] encrypted_text=read_from_file(new File(root, Integer.toString(i)));
             salt[last_index]  += 1;
+            byte[] encrypted_text_unpad = Arrays.copyOfRange(encrypted_text, 0, Block_size);
+
             byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
-            byte[] plain_text = decript_AES(encrypted_text, pwd_base_key);
+            byte[] plain_text = decript_AES(encrypted_text_unpad, pwd_base_key);
             String temp = new String(plain_text, StandardCharsets.UTF_8);
             if (i == end_block + 1) {
                 temp = temp.substring(0, starting_position + len - end_block * Block_size);
             }
             if (i == start_block + 1) {
-                temp = temp.substring(starting_position - start_block * Block_size);
+                temp = temp.substring(starting_position - start_block * Block_size); //Index out of bound
             }
             toReturn += temp;
         }
-        System.out.println(toReturn);
-        return toReturn.getBytes("UTF-8");
+        return toReturn.getBytes();
     }
     
 
@@ -465,9 +461,13 @@ public class EFS extends Utility {
      */
     @Override
     public void write(String file_name, int starting_position, byte[] content, String password) throws Exception {
-        String str_content = new String(content, StandardCharsets.UTF_8);
+        // Verify password
+        byte[] metadata = getMetadata(file_name);
+        if (!verify_pwd(metadata, password)) {
+            throw new Exception("Password does not match");
+        }
+        String str_content = new String(content, StandardCharsets.UTF_8);//byteArray2String(content);
         int len = str_content.length();
-
         File root = new File(file_name);
         int file_length = length(file_name, password);
 
@@ -479,12 +479,14 @@ public class EFS extends Utility {
         int num_blocks = (int) Math.ceil((double) content.length / Config.BLOCK_SIZE);
 
         int start_block = starting_position / Block_size;
-        int end_block = (starting_position + len - 1) / Block_size;
+        int end_block = (starting_position + len -1) / Block_size;
 
-        byte[] metadata = getMetadata(file_name);
         byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
-        
-        String padded_password = padString(password, 128);
+        StringBuilder padded_str = new StringBuilder(password);
+        while (padded_str.length() < 128) {
+            padded_str.append('\0');
+        }
+        String padded_password = padded_str.toString();
 
         int lastIndex = salt.length - 1;
         salt[lastIndex] += start_block;
@@ -494,9 +496,16 @@ public class EFS extends Utility {
             int ep = (i) * Block_size - starting_position;
             String prefix = "";
             String postfix = "";
-            if (i == start_block + 1 && starting_position != start_block * Block_size) {
 
-                prefix = new String(read_from_file(new File(root, Integer.toString(i))), StandardCharsets.UTF_8);
+            salt[lastIndex] += 1;
+            byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
+
+            if (i == start_block + 1 && starting_position != start_block * Block_size) {
+                byte[] encrypted_prefix=read_from_file(new File(root, Integer.toString(i)));
+                byte[] encrypted_text_unpad = Arrays.copyOfRange(encrypted_prefix, 0, Block_size);
+                byte[] plain_prefix = decript_AES(encrypted_text_unpad, pwd_base_key);
+                prefix = new String(plain_prefix, StandardCharsets.UTF_8);
+                // prefix = new String(read_from_file(new File(root, Integer.toString(i))), StandardCharsets.UTF_8);//byteArray2String(read_from_file(new File(root, Integer.toString(i))));
                 prefix = prefix.substring(0, starting_position - start_block * Block_size);
                 sp = Math.max(sp, 0);
             }
@@ -504,8 +513,11 @@ public class EFS extends Utility {
             if (i == end_block + 1) {
                 File end = new File(root, Integer.toString(i));
                 if (end.exists()) {
-
-                    postfix = new String(read_from_file(new File(root, Integer.toString(i))), StandardCharsets.UTF_8);
+                    byte[] encrypted_postfix=read_from_file(new File(root, Integer.toString(i)));
+                    byte[] encrypted_postfix_unpad = Arrays.copyOfRange(encrypted_postfix, 0, Block_size);
+                    byte[] plain_postfix = decript_AES(encrypted_postfix_unpad, pwd_base_key);
+                    postfix = new String(plain_postfix, StandardCharsets.UTF_8);
+                    //postfix = new String(read_from_file(new File(root, Integer.toString(i))), StandardCharsets.UTF_8);//byteArray2String(read_from_file(new File(root, Integer.toString(i))));
 
                     if (postfix.length() > starting_position + len - end_block * Block_size) {
                         postfix = postfix.substring(starting_position + len - end_block * Block_size);
@@ -517,77 +529,77 @@ public class EFS extends Utility {
             }
 
             String toWrite = prefix + str_content.substring(sp, ep) + postfix;
-            byte[] written_content = toWrite.getBytes();
-            salt[lastIndex] += 1;
 
-            byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
-            //written_content = round_off(written_content);
-            if(written_content.length<848){
-                written_content = ISO7816_4Pad(written_content, (848));
+            byte[] written_content = toWrite.getBytes();
+
+            
+            // written_content = round_off(written_content);
+            if(written_content.length<912){
+                written_content = ISO7816_4Pad(written_content, 912);
             }
+
+
             byte[] encrypted_secret_data = encript_AES(written_content, pwd_base_key);
             byte[] computed_hmac = hash_SHA256(encrypted_secret_data);
 
             byte[] combined = new byte[encrypted_secret_data.length + computed_hmac.length];
 
             System.arraycopy(encrypted_secret_data, 0, combined, 0, encrypted_secret_data.length);
-            System.arraycopy(computed_hmac, 0, combined,encrypted_secret_data.length, computed_hmac.length);
+            System.arraycopy(computed_hmac, 0, combined, encrypted_secret_data.length, computed_hmac.length);
 
             byte[] combinedAndPadded = ISO7816_4Pad(combined, 1024);
 
+            // byte[] combinedAndPadded = new byte[combined.length + padded.length];
+            // System.arraycopy(combined, 0, combinedAndPadded, 0, combined.length);
+            // System.arraycopy(padded, 0, combinedAndPadded, combined.length, padded.length);
+
             save_to_file(combinedAndPadded, new File(root, Integer.toString(i)));
         }
-        
-        //update meta data
-        System.out.println("editing metadata");
 
-        byte[] hashed_salted_password = Arrays.copyOfRange(metadata, USER_NAME_LENGTH, USER_NAME_LENGTH + PWD_LENGTH);
 
         // get new content length
-        //byte[] file_len = ByteBuffer.allocate(4).putInt(len).array();
-        //System.out.println("file_len "+ file_len);
-        byte[] file_len = longToBytes(len);
-        byte[] meta_secret_data = new byte[hashed_salted_password.length + file_len.length];
-    
-        int secret_data_idx = 0;
-        for (byte b : hashed_salted_password) {
-            meta_secret_data[secret_data_idx++] = b;
-        }
-        for (byte b : file_len) {
-            meta_secret_data[secret_data_idx++] = b;
-        }
-
-        meta_secret_data = padToMultiple(meta_secret_data, 128);
-
-        byte[] new_salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
-        byte[] pwd_key = deriveKeyFromPassword(padded_password, new_salt);
-        byte[] encrypted_secret = encript_AES(meta_secret_data, pwd_key);
-
-        byte[] header = Arrays.copyOfRange(metadata, 0, HEADER_LENGTH);
-
-
-        byte[] meta_data = new byte[header.length + encrypted_secret.length];
+        if (starting_position + len > length(file_name, password)){
+            byte[] file_len = longToBytes(starting_position + len);
+            byte[] hashed_salted_password = Arrays.copyOfRange(metadata, USER_NAME_LENGTH, USER_NAME_LENGTH + PWD_LENGTH);
+            byte[] meta_secret_data = new byte[hashed_salted_password.length + file_len.length];
         
+            int secret_data_idx = 0;
+            for (byte b : hashed_salted_password) {
+                meta_secret_data[secret_data_idx++] = b;
+            }
+            for (byte b : file_len) {
+                meta_secret_data[secret_data_idx++] = b;
+            }
 
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        outputStream.write(header);
-        outputStream.write(encrypted_secret);
-        meta_data = outputStream.toByteArray();
+            meta_secret_data = padToMultiple(meta_secret_data, 128);
 
-        byte[] hmac = hash_SHA256(meta_data);
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] get_salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
+            byte[] pwd_key = deriveKeyFromPassword(padded_password, get_salt);
+            byte[] encrypted_secret = encript_AES(meta_secret_data, pwd_key);
 
-        byte[] combine_data = new byte[meta_data.length +"\n".getBytes().length+ HMAC_LENGTH];
-        System.arraycopy(meta_data, 0, combine_data, 0, meta_data.length);
-        System.arraycopy("\n".getBytes(), 0, combine_data, meta_data.length, "\n".length());
-        System.arraycopy(hmac, 0, combine_data, meta_data.length+"\n".length(), HMAC_LENGTH);
-        byte[] padding = ISO7816_4Pad(combine_data, 1024);
-        output.write(padding);
-        byte[] outputBytes = output.toByteArray();
-    
-        File dir = new File(file_name);
-        File metadata_file = new File(dir, "0");
-        save_to_file(outputBytes, metadata_file);
+            byte[] header = Arrays.copyOfRange(metadata, 0, HEADER_LENGTH);
+
+            byte[] meta_data = new byte[header.length + encrypted_secret.length];
+            ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+            outputStream.write(header);
+            outputStream.write(encrypted_secret);
+            meta_data = outputStream.toByteArray();
+
+            byte[] hmac = hash_SHA256(meta_data);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+
+            byte[] combine_data = new byte[meta_data.length +"\n".getBytes().length+ HMAC_LENGTH];
+            System.arraycopy(meta_data, 0, combine_data, 0, meta_data.length);
+            System.arraycopy("\n".getBytes(), 0, combine_data, meta_data.length, "\n".length());
+            System.arraycopy(hmac, 0, combine_data, meta_data.length+"\n".length(), HMAC_LENGTH);
+            byte[] padding = ISO7816_4Pad(combine_data, 1024);
+            output.write(padding);
+            byte[] outputBytes = output.toByteArray();
+        
+            File dir = new File(file_name);
+            File metadata_file = new File(dir, "0");
+            save_to_file(outputBytes, metadata_file);
+        }    
     }
 
     
@@ -617,7 +629,7 @@ public class EFS extends Utility {
             return false;
         }
 
-        int Block_size = 848;
+        int Block_size = 912;
         int file_length = length(file_name, password);
         int start_block = 1;
         int end_block = (int) (Math.ceil((float)file_length / (float)Block_size));
@@ -633,7 +645,6 @@ public class EFS extends Utility {
             byte[] computed_hmac = hash_SHA256(data);
 
             if (!Arrays.equals(hmac, computed_hmac)) {
-                temp_input.close();
                 return false;
             }
             temp_input.close();
@@ -653,27 +664,128 @@ public class EFS extends Utility {
      */
     @Override
     public void cut(String file_name, int length, String password) throws Exception {
-    }
+
+        // Verify password
+         byte[] metadata = getMetadata(file_name);
+         if (!verify_pwd(metadata, password)) {
+             throw new Exception("Password does not match");
+         } 
+ 
+         StringBuilder padded_str = new StringBuilder(password);
+         while (padded_str.length() < 128) {
+             padded_str.append('\0');
+         }
+         String padded_password = padded_str.toString();
+         byte[] salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
+         int last_index = salt.length-1;
+ 
+         File root = new File(file_name);
+         int file_length = length(file_name, password);
+ 
+         if (length > file_length) {
+             throw new Exception();
+         }
+ 
+         int Block_size = 912;
+         int end_block = (length) / Block_size;
+         salt[last_index] += end_block+1;
+ 
+         byte[] encrypted_file = read_from_file(new File(root, Integer.toString(end_block + 1)));
+         byte[] encrypted_file_unpad = Arrays.copyOfRange(encrypted_file, 0, Block_size);
+         byte[] pwd_base_key = deriveKeyFromPassword(padded_password, salt);
+         byte[] plain_text = decript_AES(encrypted_file_unpad, pwd_base_key);
+         String str = new String(plain_text, StandardCharsets.UTF_8);
+ 
+         str = str.substring(0, length - end_block * Block_size);
+         byte[] written_content = str.getBytes();
+         
+         if(written_content.length<912){
+             written_content = ISO7816_4Pad(written_content, 912);
+         }
+ 
+         byte[] encrypted_secret_data = encript_AES(written_content, pwd_base_key);
+         byte[] computed_hmac = hash_SHA256(encrypted_secret_data);
+ 
+         byte[] combined = new byte[encrypted_secret_data.length + computed_hmac.length];
+ 
+         System.arraycopy(encrypted_secret_data, 0, combined, 0, encrypted_secret_data.length);
+         System.arraycopy(computed_hmac, 0, combined, encrypted_secret_data.length, computed_hmac.length);
+ 
+         byte[] combinedAndPadded = ISO7816_4Pad(combined, 1024);
+         
+         save_to_file(combinedAndPadded, new File(root, Integer.toString(end_block + 1)));
+ 
+         int cur = end_block + 2;
+         File file = new File(root, Integer.toString(cur));
+         while (file.exists()) {
+             file.delete();
+             cur++;
+         }
+ 
+         //update meta data
+         byte[] file_len = longToBytes(length);
+         byte[] hashed_salted_password = Arrays.copyOfRange(metadata, USER_NAME_LENGTH, USER_NAME_LENGTH + PWD_LENGTH);
+         byte[] meta_secret_data = new byte[hashed_salted_password.length + file_len.length];
+     
+         int secret_data_idx = 0;
+         for (byte b : hashed_salted_password) {
+             meta_secret_data[secret_data_idx++] = b;
+         }
+         for (byte b : file_len) {
+             meta_secret_data[secret_data_idx++] = b;
+         }
+ 
+         meta_secret_data = padToMultiple(meta_secret_data, 128);
+ 
+         byte[] get_salt = Arrays.copyOfRange(metadata, USER_NAME_LENGTH + PWD_LENGTH, HEADER_LENGTH);
+         byte[] pwd_key = deriveKeyFromPassword(padded_password, get_salt);
+         byte[] encrypted_secret = encript_AES(meta_secret_data, pwd_key);
+ 
+         byte[] header = Arrays.copyOfRange(metadata, 0, HEADER_LENGTH);
+ 
+         byte[] meta_data = new byte[header.length + encrypted_secret.length];
+         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+         outputStream.write(header);
+         outputStream.write(encrypted_secret);
+         meta_data = outputStream.toByteArray();
+ 
+         byte[] hmac = hash_SHA256(meta_data);
+         ByteArrayOutputStream output = new ByteArrayOutputStream();
+ 
+         byte[] combine_data = new byte[meta_data.length +"\n".getBytes().length+ HMAC_LENGTH];
+         System.arraycopy(meta_data, 0, combine_data, 0, meta_data.length);
+         System.arraycopy("\n".getBytes(), 0, combine_data, meta_data.length, "\n".length());
+         System.arraycopy(hmac, 0, combine_data, meta_data.length+"\n".length(), HMAC_LENGTH);
+         byte[] padding = ISO7816_4Pad(combine_data, 1024);
+         output.write(padding);
+         byte[] outputBytes = output.toByteArray();
+     
+         File dir = new File(file_name);
+         File metadata_file = new File(dir, "0");
+         save_to_file(outputBytes, metadata_file);
+     }
 
     private static String getContent(){
-        String content = new String("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse ut sem nunc. Nulla facilisi. Nulla facilisi. Sed non malesuada tortor. Maecenas euismod euismod ipsum, vel feugiat quam. Morbi vestibulum placerat tellus vel feugiat. Nullam eget rutrum felis. Duis sed nibh pharetra, gravida neque nec, tempor magna. Sed ac risus non mauris elementum euismod. Donec dignissim, mauris vel hendrerit pharetra, sapien tortor mattis lectus, id dapibus turpis ipsum ut nunc. Aliquam erat volutpat. Sed iaculis neque ac lacus tincidunt faucibus. Donec vel nisi quis erat tincidunt sollicitudin vel vel odio. Vestibulum euismod diam in quam varius, nec iaculis orci consequat. Sed vel blandit tellus. Etiam a dolor libero. Fusce lobortis, elit in laoreet interdum, ante ante dictum magna, sit amet luctus quam sapien at ipsum. Sed bibendum lorem non massa malesuada, non consectetur eros faucibus. Nulla facilisi. Sed fermentum feugiat sapien, at efficitur velit volutpat vel. Duis bibendum est eu arcu tincidunt, nec scelerisque erat vehicula. In sit amet massa tristique, ultrices purus vel, imperdiet quam. Donec rutrum purus vel nibh aliquet, a luctus ipsum facilisis. Nulla fringilla est odio, in tincidunt ipsum congue id. Nulla facilisi. Sed vulputate aliquam nulla, eu mollis purus semper ac. Duis quis arcu euismod, consectetur dolor id, posuere quam. Nunc vel erat lectus. Donec volutpat erat elit, eu viverra nibh fermentum eu. Praesent in leo a sapien molestie maximus. Duis non imperdiet dolor. Nam vehicula auctor purus, eget cursus arcu cursus sed. Fusce maximus lectus non magna vehicula malesuada. Suspendisse malesuada diam eget nibh porttitor, vitae blandit ante varius. Duis varius fringilla nisl, vel feugiat sapien laoreet at. Sed in velit neque. Vestibulum suscipit blandit magna, a pellentesque nisl maximus vitae. Aenean commodo risus sed risus ultricies tristique a vel nisi. Sed commodo elit sit amet dolor aliquam venenatis. Praesent at bibendum urna. Etiam vel ex sed leo finibus venenatis. Sed sed ipsum sit amet elit rutrum suscipit vel vel elit. Nulla varius blandit leo, quis bibendum ante molestie sit amet. Donec id luctus lectus. Quisque rutrum felis at mi tincidunt posuere. Donec pretium mi eu sem dignissim fringilla. Morbi gravida lorem vel mauris auctor, eget eleifend nibh efficitur. Nulla facilisi. In hac habitasse platea dictumst. Suspendisse viverra justo at felis malesuada, vel mattis leo varius. Maecenas maximus augue ac bibendum aliquet. Vivamus sit amet purus ac arcu pulvinar egestas. Integer faucibus");
+        //String content = new String("Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse ut sem nunc. Nulla facilisi. Nulla facilisi. Sed non malesuada tortor. Maecenas euismod euismod ipsum, vel feugiat quam. Morbi vestibulum placerat tellus vel feugiat. Nullam eget rutrum felis. Duis sed nibh pharetra, gravida neque nec, tempor magna. Sed ac risus non mauris elementum euismod. Donec dignissim, mauris vel hendrerit pharetra, sapien tortor mattis lectus, id dapibus turpis ipsum ut nunc. Aliquam erat volutpat. Sed iaculis neque ac lacus tincidunt faucibus. Donec vel nisi quis erat tincidunt sollicitudin vel vel odio. Vestibulum euismod diam in quam varius, nec iaculis orci consequat. Sed vel blandit tellus. Etiam a dolor libero. Fusce lobortis, elit in laoreet interdum, ante ante dictum magna, sit amet luctus quam sapien at ipsum. Sed bibendum lorem non massa malesuada, non consectetur eros faucibus. Nulla facilisi. Sed fermentum feugiat sapien, at efficitur velit volutpat vel. Duis bibendum est eu arcu tincidunt, nec scelerisque erat vehicula. In sit amet massa tristique, ultrices purus vel, imperdiet quam. Donec rutrum purus vel nibh aliquet, a luctus ipsum facilisis. Nulla fringilla est odio, in tincidunt ipsum congue id. Nulla facilisi. Sed vulputate aliquam nulla, eu mollis purus semper ac. Duis quis arcu euismod, consectetur dolor id, posuere quam. Nunc vel erat lectus. Donec volutpat erat elit, eu viverra nibh fermentum eu. Praesent in leo a sapien molestie maximus. Duis non imperdiet dolor. Nam vehicula auctor purus, eget cursus arcu cursus sed. Fusce maximus lectus non magna vehicula malesuada. Suspendisse malesuada diam eget nibh porttitor, vitae blandit ante varius. Duis varius fringilla nisl, vel feugiat sapien laoreet at. Sed in velit neque. Vestibulum suscipit blandit magna, a pellentesque nisl maximus vitae. Aenean commodo risus sed risus ultricies tristique a vel nisi. Sed commodo elit sit amet dolor aliquam venenatis. Praesent at bibendum urna. Etiam vel ex sed leo finibus venenatis. Sed sed ipsum sit amet elit rutrum suscipit vel vel elit. Nulla varius blandit leo, quis bibendum ante molestie sit amet. Donec id luctus lectus. Quisque rutrum felis at mi tincidunt posuere. Donec pretium mi eu sem dignissim fringilla. Morbi gravida lorem vel mauris auctor, eget eleifend nibh efficitur. Nulla facilisi. In hac habitasse platea dictumst. Suspendisse viverra justo at felis malesuada, vel mattis leo varius. Maecenas maximus augue ac bibendum aliquet. Vivamus sit amet purus ac arcu pulvinar egestas. Integer faucibus");
+        String content = new String("With IT, the world has become much smaller to the hands. You can get quick and easy access to information from all over the world and even share, see or chat with people miles away. Business transactions, space exploration, watching movies, and buying digital books has become much easier than before all through a click of the computer. In this manner, information technology is revolutionizing the world with its greatest advantage. It makes the process of information sharing much easy, fast, cheap, and enjoyable. In a nutshell, IT has made the world a better place with reduced workload and advanced comfort.With IT, the world has become much smaller to the hands. You can get quick and easy access to information from all over the world and even share, see or chat with people miles away. Business transactions, space exploration, watching movies, and buying digital books has become much easier than before all through a click of the computer. In this manner, information technology is revolutionizing the world with its greatest advantage. It makes the process of information sharing much easy, fast, cheap, and enjoyable. In a nutshell, IT has made the world a better place with reduced workload and advanced comfort.");
         return content;
     }
 
-    public static void main(String[] args) {
+    /*public static void main(String[] args) {
          Editor edr = new Editor();
          EFS efs = new EFS(edr);
          try {
-             efs.create("my_file7", "HelloWORLD", "macbook");
-             System.out.println(efs.findUser("my_file7"));
-             System.out.println(efs.length("my_file7","macbook"));
-             efs.write("my_file7",0,getContent().getBytes(),"macbook");
-             efs.read("my_file7",800,500,"macbook");
-             System.out.println(efs.check_integrity("my_file7","macbook"));
+             //efs.create("my_file10", "HelloWORLD", "macbook");
+             //System.out.println(efs.findUser("my_file10"));
+             //System.out.println(efs.length("my_file10","macbook"));
+             //efs.write("my_file10",0,getContent().getBytes(),"macbook");
+             efs.write("my_file10",900,"Hello world".getBytes(),"macbook");
+             efs.read("my_file10",900,50,"macbook");
+             //System.out.println(efs.check_integrity("my_file10","macbook"));
          } catch (Exception e) {
              System.err.println("Error: " + e.getMessage());
          }
  
-     }
+     }*/
 
 }
