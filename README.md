@@ -1,6 +1,6 @@
 # Encrypted-File-System-EFS-
 <p align="left"><b><i> Contributors: </b><br/>
-Pritul Dave, Tweensie Jasani </i><br/><br/></p>
+Pritul Dave, Tweensie Jasani <br/> Computer Science - University of Texas Dallas </i><br/><br/>
 
 In a traditional file system, files are usually stored on disks unencrypted. When the disks are stolen by
 someone, contents of those files can be easily recovered by the malicious people.
