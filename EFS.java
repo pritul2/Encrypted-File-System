@@ -1,10 +1,3 @@
-
-/**
- * @author Pritul Manish
- * @netid PMD220000
- * @email pritul.dave@utdallas.edu
- */
-
  import java.io.ByteArrayOutputStream;
  import java.io.File;
  import java.io.FileInputStream;
@@ -618,16 +611,6 @@ public byte[] readAndCopyFile(File root, int Eblock, int Block_size) throws Exce
          return true;
    }
  
-     /**
-      * Steps to consider...
-      * <p>
-      * - verify password
-      * <p>
-      * - truncate the content after the specified length
-      * <p>
-      * - re-pad, update metadata and HMAC
-      * <p>
-      */
      @Override
      public void cut(String file_name, int length, String password) throws Exception {
  
