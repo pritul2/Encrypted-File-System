@@ -66,3 +66,5 @@ The use of block-based reading and writing improves the speed efficiency of the 
 Overall, the design prioritizes security over storage and speed efficiency. The use of robust security features, such as HMAC, SHA-256, and AES, adds some overheads to the storage and computational efficiency. However, the use of block-based reading and writing improves the speed efficiency of the design, making it a good balance of security and performance.
 
 
+# Simulation:
+[![IMAGE ALT TEXT](https://i9.ytimg.com/vi_webp/jnXEi089bK4/mq1.webp?sqp=CPSau6AG-oaymwEmCMACELQB8quKqQMa8AEB-AH-CYACpgWKAgwIABABGGUgZShlMA8=&rs=AOn4CLAuwED7uXkJOu9ybv4Thplszz1P9w)](https://youtu.be/jnXEi089bK4 "Encrypted File System Simulation")
