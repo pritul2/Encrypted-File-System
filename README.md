@@ -67,4 +67,4 @@ Overall, the design prioritizes security over storage and speed efficiency. The 
 
 
 # Simulation:
-[![IMAGE ALT TEXT](https://i9.ytimg.com/vi_webp/jnXEi089bK4/mq1.webp?sqp=CPSau6AG-oaymwEmCMACELQB8quKqQMa8AEB-AH-CYACpgWKAgwIABABGGUgZShlMA8=&rs=AOn4CLAuwED7uXkJOu9ybv4Thplszz1P9w)]([https://youtu.be/jnXEi089bK4](https://www.youtube.com/watch?v=jnXEi089bK4) "Encrypted File System Simulation")
+[![IMAGE ALT TEXT](https://i.ytimg.com/vi/jnXEi089bK4/hqdefault.jpg?sqp=-oaymwE2CNACELwBSFXyq4qpAygIARUAAIhCGAFwAcABBvABAfgB_gmAAqYFigIMCAAQARhlIGUoZTAP&rs=AOn4CLB8afDdDfarqzu7ncMGeuL81Z9Fnw)]([https://youtu.be/jnXEi089bK4](https://www.youtube.com/watch?v=jnXEi089bK4) "Encrypted File System Simulation")
